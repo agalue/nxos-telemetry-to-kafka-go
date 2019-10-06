@@ -5,11 +5,17 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/mdt_dialout"
+	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
+	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
+	"github.com/golang/protobuf/proto"
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
@@ -18,8 +24,21 @@ import (
 func main() {
 	kafkaServer := flag.String("bootstrap", "localhost:9092", "kafka bootstrap server")
 	kafkaTopic := flag.String("topic", "telemetry-nxos", "kafka topic that will receive the messages")
+	onmsMode := flag.Bool("opennms", false, "to emulate an OpenNMS minion when sending messages to kafka")
+	minionID := flag.String("minion-id", "", "the ID of the minion to emulate [opennms mode only]")
+	minionLocation := flag.String("minion-location", "", "the location of the minion to emulate [opennms mode only]")
+	maxBufferSize := flag.Int("max-buffer-size", 0, "maximum buffer size")
 	port := flag.Int("port", 50001, "port to listen for gRPC requests")
 	flag.Parse()
+
+	if *onmsMode {
+		if *minionID == "" {
+			log.Fatalln("minion ID is mandatory when using opennms mode")
+		}
+		if *minionLocation == "" {
+			log.Fatalln("minion location is mandatory when using opennms mode")
+		}
+	}
 
 	log.Printf("starting gRPC server on port %d\n", *port)
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
@@ -46,7 +65,16 @@ func main() {
 	}()
 
 	grpcServer := grpc.NewServer()
-	mdt_dialout.RegisterGRPCMdtDialoutServer(grpcServer, dialoutServer{kafkaProducer, *kafkaTopic})
+	mdt_dialout.RegisterGRPCMdtDialoutServer(grpcServer, dialoutServer{
+		kafkaProducer,
+		*kafkaTopic,
+		*onmsMode,
+		*port,
+		int32(*maxBufferSize),
+		*minionID,
+		*minionLocation,
+		"127.0.0.1", // FIXME
+	})
 
 	go func() {
 		err = grpcServer.Serve(listener)
@@ -65,8 +93,14 @@ func main() {
 }
 
 type dialoutServer struct {
-	producer *kafka.Producer
-	topic    string
+	producer       *kafka.Producer
+	topic          string
+	onmsMode       bool
+	port           int
+	maxBufferSize  int32
+	minionID       string
+	minionLocation string
+	minionAddress  string
 }
 
 func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialoutServer) error {
@@ -95,10 +129,88 @@ func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialout
 	}
 }
 
-// FIXME Should support split mode and opennms mode
 func (srv dialoutServer) sendToKafka(data []byte) {
-	srv.producer.Produce(&kafka.Message{
-		TopicPartition: kafka.TopicPartition{Topic: &srv.topic, Partition: kafka.PartitionAny},
-		Value:          data,
-	}, nil)
+	msg := data
+	if srv.onmsMode {
+		msg = srv.buildTelemetryMessage(data)
+	}
+	id := uuid.New().String()
+	totalChunks := srv.getTotalChunks(msg)
+	log.Printf("sending message of %d bytes divided into %d chunks\n", len(msg), totalChunks)
+	var chunk int32
+	for chunk = 0; chunk < totalChunks; chunk++ {
+		chunkID := chunk + 1
+		bytes := srv.wrapMessageToProto(id, chunk, totalChunks, msg)
+		log.Printf("sending chunk %d/%d to Kafka topic %s using messageId %s", chunkID, totalChunks, srv.topic, id)
+		srv.producer.Produce(&kafka.Message{
+			TopicPartition: kafka.TopicPartition{Topic: &srv.topic, Partition: kafka.PartitionAny},
+			Value:          bytes,
+		}, nil)
+	}
+}
+
+func (srv dialoutServer) getTotalChunks(data []byte) int32 {
+	if srv.maxBufferSize == 0 {
+		return int32(1)
+	}
+	chunks := int32(math.Ceil(float64(int32(len(data)) / srv.maxBufferSize)))
+	if int32(len(data))%srv.maxBufferSize > 0 {
+		chunks++
+	}
+	return chunks
+}
+
+func (srv dialoutServer) wrapMessageToProto(id string, chunk, totalChunks int32, data []byte) []byte {
+	bufferSize := srv.getRemainingBufferSize(int32(len(data)), chunk)
+	offset := chunk * srv.maxBufferSize
+	msg := data[offset : offset+bufferSize]
+	sinkMsg := &sink.SinkMessage{
+		MessageId:          &id,
+		CurrentChunkNumber: &chunk,
+		TotalChunks:        &totalChunks,
+		Content:            msg,
+	}
+	bytes, err := proto.Marshal(sinkMsg)
+	if err != nil {
+		log.Printf("error cannot serialize sink message: %v\n", err)
+		return []byte{}
+	}
+	return bytes
+}
+
+func (srv dialoutServer) getRemainingBufferSize(messageSize, chunk int32) int32 {
+	if srv.maxBufferSize > 0 && messageSize > srv.maxBufferSize {
+		remaining := messageSize - chunk*srv.maxBufferSize
+		if remaining > srv.maxBufferSize {
+			return srv.maxBufferSize
+		}
+		return remaining
+	}
+	return messageSize
+}
+
+func (srv dialoutServer) buildTelemetryMessage(data []byte) []byte {
+	log.Printf("wrapping message to emulate minion %s at location %s\n", srv.minionID, srv.minionLocation)
+	now := uint64(time.Now().UnixNano() / int64(time.Millisecond))
+	port := uint32(srv.port)
+
+	telemetryMsg := &telemetry.TelemetryMessage{
+		Timestamp: &now,
+		Bytes:     data,
+	}
+
+	telemetryLogMsg := &telemetry.TelemetryMessageLog{
+		SystemId:      &srv.minionID,
+		Location:      &srv.minionLocation,
+		SourceAddress: &srv.minionAddress,
+		SourcePort:    &port,
+		Message:       []*telemetry.TelemetryMessage{telemetryMsg},
+	}
+
+	msg, err := proto.Marshal(telemetryLogMsg)
+	if err != nil {
+		log.Printf("error cannot serialize telemetry message: %v\n", err)
+		return []byte{}
+	}
+	return msg
 }
