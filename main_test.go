@@ -12,7 +12,7 @@ import (
 
 func TestTotalChunks(t *testing.T) {
 	srv := dialoutServer{}
-	assert.Equal(t, int32(0), srv.maxBufferSize)
+	assert.Equal(t, 0, srv.maxBufferSize)
 	assert.Equal(t, int32(1), srv.getTotalChunks([]byte("test")))
 	srv.maxBufferSize = 4
 	assert.Equal(t, int32(2), srv.getTotalChunks([]byte("abcdEFG")))

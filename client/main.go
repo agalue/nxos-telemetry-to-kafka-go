@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
-	"os"
-	"os/signal"
+	"time"
 
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/mdt_dialout"
+	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry_bis"
+	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 )
 
@@ -28,15 +30,38 @@ func main() {
 
 	req := &mdt_dialout.MdtDialoutArgs{
 		ReqId: 1,
-		Data:  []byte("Go is awesome!"),
+		Data:  getTelemetryBytes(),
 	}
 	go stream.Send(req)
 	go stream.Recv()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	<-stop
-	log.Println("shutting down...")
+	time.Sleep(5 * time.Second)
 	stream.CloseSend()
 	log.Println("done!")
+}
+
+func getTelemetryBytes() []byte {
+	telemetry := &telemetry_bis.Telemetry{
+		MsgTimestamp: 1543236572000,
+		EncodingPath: "type:test",
+		NodeId:       &telemetry_bis.Telemetry_NodeIdStr{NodeIdStr: "hostname"},
+		Subscription: &telemetry_bis.Telemetry_SubscriptionIdStr{SubscriptionIdStr: "subscription"},
+		DataGpbkv: []*telemetry_bis.TelemetryField{
+			{
+				Fields: []*telemetry_bis.TelemetryField{
+					{
+						Name: "content",
+						Fields: []*telemetry_bis.TelemetryField{
+							{
+								Name:        "owner",
+								ValueByType: &telemetry_bis.TelemetryField_StringValue{StringValue: "agalue"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	fmt.Printf("sending %s", proto.MarshalTextString(telemetry))
+	data, _ := proto.Marshal(telemetry)
+	return data
 }

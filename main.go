@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/mdt_dialout"
@@ -22,40 +23,91 @@ import (
 	"google.golang.org/grpc/peer"
 )
 
+var (
+	version = "v0.1.0"
+	server  = dialoutServer{
+		minionAddress: "127.0.0.1", // FIXME
+	}
+)
+
 func main() {
-	kafkaServer := flag.String("bootstrap", "localhost:9092", "kafka bootstrap server")
-	kafkaTopic := flag.String("topic", "telemetry-nxos", "kafka topic that will receive the messages")
-	onmsMode := flag.Bool("opennms", false, "to emulate an OpenNMS minion when sending messages to kafka")
-	minionID := flag.String("minion-id", "", "the ID of the minion to emulate [opennms mode only]")
-	minionLocation := flag.String("minion-location", "", "the location of the minion to emulate [opennms mode only]")
-	maxBufferSize := flag.Int("max-buffer-size", 0, "maximum buffer size")
-	port := flag.Int("port", 50001, "port to listen for gRPC requests")
-	debug := flag.Bool("debug", false, "to display a human-readable version of the GBP paylod sent by the Nexus")
+	flag.StringVar(&server.bootstrap, "bootstrap", "localhost:9092", "kafka bootstrap server")
+	flag.StringVar(&server.topic, "topic", "telemetry-nxos", "kafka topic that will receive the messages")
+	flag.Var(&server.parameters, "param", "kafka producer parameters (e.x. acks=1), can be specified multiple times")
+	flag.BoolVar(&server.onmsMode, "opennms", false, "to emulate an OpenNMS minion when sending messages to kafka")
+	flag.StringVar(&server.minionID, "minion-id", "", "the ID of the minion to emulate [opennms mode only]")
+	flag.StringVar(&server.minionLocation, "minion-location", "", "the location of the minion to emulate [opennms mode only]")
+	flag.IntVar(&server.maxBufferSize, "max-buffer-size", 0, "maximum buffer size")
+	flag.IntVar(&server.port, "port", 50001, "port to listen for gRPC requests")
+	flag.BoolVar(&server.debug, "debug", false, "to display a human-readable version of the GBP paylod sent by the Nexus")
 	flag.Parse()
 
-	if *onmsMode {
-		if *minionID == "" {
-			log.Fatalln("minion ID is mandatory when using opennms mode")
+	err := server.start()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt)
+	<-stop
+	server.stop()
+}
+
+type arrayFlags []string
+
+func (i *arrayFlags) String() string {
+	return strings.Join(*i, ", ")
+}
+
+func (i *arrayFlags) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
+
+type dialoutServer struct {
+	server         *grpc.Server
+	producer       *kafka.Producer
+	port           int
+	debug          bool
+	bootstrap      string
+	topic          string
+	parameters     arrayFlags
+	onmsMode       bool
+	maxBufferSize  int
+	minionID       string
+	minionLocation string
+	minionAddress  string
+}
+
+func (srv *dialoutServer) start() error {
+	if srv.onmsMode {
+		if srv.minionID == "" {
+			return fmt.Errorf("minion ID is mandatory when using opennms mode")
 		}
-		if *minionLocation == "" {
-			log.Fatalln("minion location is mandatory when using opennms mode")
+		if srv.minionLocation == "" {
+			return fmt.Errorf("minion location is mandatory when using opennms mode")
 		}
 	}
 
-	log.Printf("starting gRPC server on port %d\n", *port)
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", *port))
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", srv.port))
 	if err != nil {
-		log.Fatalf("could not listen to port %d: %v", *port, err)
+		return fmt.Errorf("could not listen to port %d: %v", srv.port, err)
 	}
 
-	kafkaConfig := &kafka.ConfigMap{"bootstrap.servers": *kafkaServer}
-	kafkaProducer, err := kafka.NewProducer(kafkaConfig)
+	kafkaConfig := &kafka.ConfigMap{"bootstrap.servers": srv.bootstrap}
+	for _, kv := range srv.parameters {
+		array := strings.Split(kv, "=")
+		if err = kafkaConfig.SetKey(array[0], array[1]); err != nil {
+			return err
+		}
+	}
+	srv.producer, err = kafka.NewProducer(kafkaConfig)
 	if err != nil {
-		log.Fatalf("could not create producer: %v", err)
+		return fmt.Errorf("could not create producer: %v", err)
 	}
 
 	go func() {
-		for e := range kafkaProducer.Events() {
+		for e := range srv.producer.Events() {
 			switch ev := e.(type) {
 			case *kafka.Message:
 				if ev.TopicPartition.Error != nil {
@@ -67,45 +119,25 @@ func main() {
 		}
 	}()
 
-	grpcServer := grpc.NewServer()
-	mdt_dialout.RegisterGRPCMdtDialoutServer(grpcServer, dialoutServer{
-		kafkaProducer,
-		*kafkaTopic,
-		*onmsMode,
-		*port,
-		int32(*maxBufferSize),
-		*minionID,
-		*minionLocation,
-		"127.0.0.1", // FIXME
-		*debug,
-	})
+	srv.server = grpc.NewServer()
+	mdt_dialout.RegisterGRPCMdtDialoutServer(srv.server, srv)
 
 	go func() {
-		err = grpcServer.Serve(listener)
+		log.Printf("starting gRPC server on port %d\n", srv.port)
+		err = srv.server.Serve(listener)
 		if err != nil {
 			log.Fatalf("could not serve: %v", err)
 		}
 	}()
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt)
-	<-stop
-	log.Println("shutting down...")
-	grpcServer.GracefulStop()
-	kafkaProducer.Close()
-	log.Println("done!")
+	return nil
 }
 
-type dialoutServer struct {
-	producer       *kafka.Producer
-	topic          string
-	onmsMode       bool
-	port           int
-	maxBufferSize  int32
-	minionID       string
-	minionLocation string
-	minionAddress  string
-	debug          bool
+func (srv dialoutServer) stop() {
+	log.Println("shutting down...")
+	srv.server.GracefulStop()
+	srv.producer.Close()
+	log.Println("done!")
 }
 
 func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialoutServer) error {
@@ -137,7 +169,7 @@ func (srv dialoutServer) sendToKafka(data []byte) {
 		nxosMsg := &telemetry_bis.Telemetry{}
 		err := proto.Unmarshal(data, nxosMsg)
 		if err == nil {
-			log.Printf("received message: %s\n", nxosMsg.String())
+			log.Printf("received message:\n%s", proto.MarshalTextString(nxosMsg))
 		} else {
 			log.Println("cannot parse the payload using telemetry_bis.proto")
 		}
@@ -161,12 +193,16 @@ func (srv dialoutServer) sendToKafka(data []byte) {
 	}
 }
 
+func (srv dialoutServer) getMaxBufferSize() int32 {
+	return int32(srv.maxBufferSize)
+}
+
 func (srv dialoutServer) getTotalChunks(data []byte) int32 {
 	if srv.maxBufferSize == 0 {
 		return int32(1)
 	}
-	chunks := int32(math.Ceil(float64(int32(len(data)) / srv.maxBufferSize)))
-	if int32(len(data))%srv.maxBufferSize > 0 {
+	chunks := int32(math.Ceil(float64(len(data) / srv.maxBufferSize)))
+	if len(data)%srv.maxBufferSize > 0 {
 		chunks++
 	}
 	return chunks
@@ -174,7 +210,7 @@ func (srv dialoutServer) getTotalChunks(data []byte) int32 {
 
 func (srv dialoutServer) wrapMessageToSink(id string, chunk, totalChunks int32, data []byte) []byte {
 	bufferSize := srv.getRemainingBufferSize(int32(len(data)), chunk)
-	offset := chunk * srv.maxBufferSize
+	offset := chunk * srv.getMaxBufferSize()
 	msg := data[offset : offset+bufferSize]
 	sinkMsg := &sink.SinkMessage{
 		MessageId:          &id,
@@ -191,10 +227,10 @@ func (srv dialoutServer) wrapMessageToSink(id string, chunk, totalChunks int32, 
 }
 
 func (srv dialoutServer) getRemainingBufferSize(messageSize, chunk int32) int32 {
-	if srv.maxBufferSize > 0 && messageSize > srv.maxBufferSize {
-		remaining := messageSize - chunk*srv.maxBufferSize
-		if remaining > srv.maxBufferSize {
-			return srv.maxBufferSize
+	if srv.maxBufferSize > 0 && messageSize > srv.getMaxBufferSize() {
+		remaining := messageSize - chunk*srv.getMaxBufferSize()
+		if remaining > srv.getMaxBufferSize() {
+			return srv.getMaxBufferSize()
 		}
 		return remaining
 	}
