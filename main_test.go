@@ -31,14 +31,14 @@ func TestGetRemainingBufferSize(t *testing.T) {
 	assert.Equal(t, int32(2), srv.getRemainingBufferSize(size, 2))
 }
 
-func TestWrapMessageToProto(t *testing.T) {
+func TestWrapMessageToSink(t *testing.T) {
 	srv := dialoutServer{
 		maxBufferSize: 4,
 	}
 	data := []byte("abcdEFGHij")
 	totalChunks := srv.getTotalChunks(data)
 
-	msg := srv.wrapMessageToProto("T1", 0, totalChunks, data)
+	msg := srv.wrapMessageToSink("T1", 0, totalChunks, data)
 	sinkMsg := &sink.SinkMessage{}
 	proto.Unmarshal(msg, sinkMsg)
 	assert.Equal(t, "T1", sinkMsg.GetMessageId())
@@ -46,7 +46,7 @@ func TestWrapMessageToProto(t *testing.T) {
 	assert.Equal(t, int32(0), sinkMsg.GetCurrentChunkNumber())
 	assert.Equal(t, "abcd", string(sinkMsg.GetContent()))
 
-	msg = srv.wrapMessageToProto("T2", 1, totalChunks, data)
+	msg = srv.wrapMessageToSink("T2", 1, totalChunks, data)
 	sinkMsg = &sink.SinkMessage{}
 	proto.Unmarshal(msg, sinkMsg)
 	assert.Equal(t, "T2", sinkMsg.GetMessageId())
@@ -54,7 +54,7 @@ func TestWrapMessageToProto(t *testing.T) {
 	assert.Equal(t, int32(1), sinkMsg.GetCurrentChunkNumber())
 	assert.Equal(t, "EFGH", string(sinkMsg.GetContent()))
 
-	msg = srv.wrapMessageToProto("T3", 2, totalChunks, data)
+	msg = srv.wrapMessageToSink("T3", 2, totalChunks, data)
 	sinkMsg = &sink.SinkMessage{}
 	err := proto.Unmarshal(msg, sinkMsg)
 	assert.NilError(t, err)
@@ -64,7 +64,7 @@ func TestWrapMessageToProto(t *testing.T) {
 	assert.Equal(t, "ij", string(sinkMsg.GetContent()))
 }
 
-func TestBuildTelemetryMessage(t *testing.T) {
+func TestWrapMessageToTelemetry(t *testing.T) {
 	data := []byte("opennms")
 	srv := dialoutServer{
 		maxBufferSize:  4,
@@ -73,7 +73,7 @@ func TestBuildTelemetryMessage(t *testing.T) {
 		minionID:       "minion01",
 		minionLocation: "Apex",
 	}
-	msg := srv.buildTelemetryMessage(data)
+	msg := srv.wrapMessageToTelemetry(data)
 	logMsg := &telemetry.TelemetryMessageLog{}
 	err := proto.Unmarshal(msg, logMsg)
 	assert.NilError(t, err)

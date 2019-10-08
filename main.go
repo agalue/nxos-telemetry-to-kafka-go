@@ -14,11 +14,11 @@ import (
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/mdt_dialout"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
-	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
 
 func main() {
@@ -46,7 +46,8 @@ func main() {
 		log.Fatalf("could not listen to port %d: %v", *port, err)
 	}
 
-	kafkaProducer, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": *kafkaServer})
+	kafkaConfig := &kafka.ConfigMap{"bootstrap.servers": *kafkaServer}
+	kafkaProducer, err := kafka.NewProducer(kafkaConfig)
 	if err != nil {
 		log.Fatalf("could not create producer: %v", err)
 	}
@@ -118,12 +119,10 @@ func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialout
 			}
 			return err
 		}
-
 		if len(reply.Data) == 0 && len(reply.Errors) != 0 {
 			log.Printf("error from client %s, %s\n", peer.Addr, reply.Errors)
 			return nil
 		}
-
 		log.Printf("received request with ID %d of %d bytes from %s\n", reply.ReqId, len(reply.Data), peer.Addr)
 		srv.sendToKafka(reply.Data)
 	}
@@ -132,7 +131,7 @@ func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialout
 func (srv dialoutServer) sendToKafka(data []byte) {
 	msg := data
 	if srv.onmsMode {
-		msg = srv.buildTelemetryMessage(data)
+		msg = srv.wrapMessageToTelemetry(data)
 	}
 	id := uuid.New().String()
 	totalChunks := srv.getTotalChunks(msg)
@@ -140,7 +139,7 @@ func (srv dialoutServer) sendToKafka(data []byte) {
 	var chunk int32
 	for chunk = 0; chunk < totalChunks; chunk++ {
 		chunkID := chunk + 1
-		bytes := srv.wrapMessageToProto(id, chunk, totalChunks, msg)
+		bytes := srv.wrapMessageToSink(id, chunk, totalChunks, msg)
 		log.Printf("sending chunk %d/%d to Kafka topic %s using messageId %s", chunkID, totalChunks, srv.topic, id)
 		srv.producer.Produce(&kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &srv.topic, Partition: kafka.PartitionAny},
@@ -160,7 +159,7 @@ func (srv dialoutServer) getTotalChunks(data []byte) int32 {
 	return chunks
 }
 
-func (srv dialoutServer) wrapMessageToProto(id string, chunk, totalChunks int32, data []byte) []byte {
+func (srv dialoutServer) wrapMessageToSink(id string, chunk, totalChunks int32, data []byte) []byte {
 	bufferSize := srv.getRemainingBufferSize(int32(len(data)), chunk)
 	offset := chunk * srv.maxBufferSize
 	msg := data[offset : offset+bufferSize]
@@ -189,24 +188,22 @@ func (srv dialoutServer) getRemainingBufferSize(messageSize, chunk int32) int32 
 	return messageSize
 }
 
-func (srv dialoutServer) buildTelemetryMessage(data []byte) []byte {
+func (srv dialoutServer) wrapMessageToTelemetry(data []byte) []byte {
 	log.Printf("wrapping message to emulate minion %s at location %s\n", srv.minionID, srv.minionLocation)
 	now := uint64(time.Now().UnixNano() / int64(time.Millisecond))
 	port := uint32(srv.port)
-
-	telemetryMsg := &telemetry.TelemetryMessage{
-		Timestamp: &now,
-		Bytes:     data,
-	}
-
 	telemetryLogMsg := &telemetry.TelemetryMessageLog{
 		SystemId:      &srv.minionID,
 		Location:      &srv.minionLocation,
 		SourceAddress: &srv.minionAddress,
 		SourcePort:    &port,
-		Message:       []*telemetry.TelemetryMessage{telemetryMsg},
+		Message: []*telemetry.TelemetryMessage{
+			{
+				Timestamp: &now,
+				Bytes:     data,
+			},
+		},
 	}
-
 	msg, err := proto.Marshal(telemetryLogMsg)
 	if err != nil {
 		log.Printf("error cannot serialize telemetry message: %v\n", err)
