@@ -14,6 +14,7 @@ import (
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/mdt_dialout"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
+	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry_bis"
 	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
@@ -29,6 +30,7 @@ func main() {
 	minionLocation := flag.String("minion-location", "", "the location of the minion to emulate [opennms mode only]")
 	maxBufferSize := flag.Int("max-buffer-size", 0, "maximum buffer size")
 	port := flag.Int("port", 50001, "port to listen for gRPC requests")
+	debug := flag.Bool("debug", false, "to display a human-readable version of the GBP paylod sent by the Nexus")
 	flag.Parse()
 
 	if *onmsMode {
@@ -75,6 +77,7 @@ func main() {
 		*minionID,
 		*minionLocation,
 		"127.0.0.1", // FIXME
+		*debug,
 	})
 
 	go func() {
@@ -102,6 +105,7 @@ type dialoutServer struct {
 	minionID       string
 	minionLocation string
 	minionAddress  string
+	debug          bool
 }
 
 func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialoutServer) error {
@@ -129,6 +133,15 @@ func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialout
 }
 
 func (srv dialoutServer) sendToKafka(data []byte) {
+	if srv.debug {
+		nxosMsg := &telemetry_bis.Telemetry{}
+		err := proto.Unmarshal(data, nxosMsg)
+		if err == nil {
+			log.Printf("received message: %s\n", nxosMsg.String())
+		} else {
+			log.Println("cannot parse the payload using telemetry_bis.proto")
+		}
+	}
 	msg := data
 	if srv.onmsMode {
 		msg = srv.wrapMessageToTelemetry(data)
