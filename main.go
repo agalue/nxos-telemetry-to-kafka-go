@@ -84,10 +84,12 @@ func (srv *dialoutServer) start() error {
 	}
 
 	kafkaConfig := &kafka.ConfigMap{"bootstrap.servers": srv.bootstrap}
-	for _, kv := range strings.Split(srv.parameters, ",") {
-		array := strings.Split(kv, "=")
-		if err = kafkaConfig.SetKey(array[0], array[1]); err != nil {
-			return err
+	if srv.parameters != "" {
+		for _, kv := range strings.Split(srv.parameters, ",") {
+			array := strings.Split(kv, "=")
+			if err = kafkaConfig.SetKey(array[0], array[1]); err != nil {
+				return err
+			}
 		}
 	}
 	srv.producer, err = kafka.NewProducer(kafkaConfig)
@@ -105,7 +107,7 @@ func (srv *dialoutServer) start() error {
 					log.Printf("delivered message to %v\n", ev.TopicPartition)
 				}
 			default:
-				log.Printf("Ignored event: %s\n", ev)
+				log.Printf("kafka event: %s\n", ev)
 			}
 		}
 	}()

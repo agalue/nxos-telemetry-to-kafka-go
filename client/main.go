@@ -27,10 +27,12 @@ func main() {
 		"group.id":          groupID,
 		"auto.offset.reset": "latest",
 	}
-	for _, kv := range strings.Split(parameters, ",") {
-		array := strings.Split(kv, "=")
-		if err := config.SetKey(array[0], array[1]); err != nil {
-			log.Fatalf("cannot add consumer config %s: %v\n", kv, err)
+	if parameters != "" {
+		for _, kv := range strings.Split(parameters, ",") {
+			array := strings.Split(kv, "=")
+			if err := config.SetKey(array[0], array[1]); err != nil {
+				log.Fatalf("cannot add consumer config %s: %v\n", kv, err)
+			}
 		}
 	}
 
