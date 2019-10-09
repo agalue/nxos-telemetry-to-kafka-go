@@ -16,11 +16,11 @@ import (
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry_bis"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
+	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
 
 var (
@@ -115,6 +115,8 @@ func (srv *dialoutServer) start() error {
 				} else {
 					log.Printf("delivered message to %v\n", ev.TopicPartition)
 				}
+			default:
+				log.Printf("Ignored event: %s\n", ev)
 			}
 		}
 	}()
@@ -188,6 +190,7 @@ func (srv dialoutServer) sendToKafka(data []byte) {
 		log.Printf("sending chunk %d/%d to Kafka topic %s using messageId %s", chunkID, totalChunks, srv.topic, id)
 		srv.producer.Produce(&kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &srv.topic, Partition: kafka.PartitionAny},
+			Key:            []byte(id), // To guarantee order when having multiple partitions
 			Value:          bytes,
 		}, nil)
 	}

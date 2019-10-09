@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 )
 
+// WARNING This is for test purposes only
 func main() {
 	backend := flag.String("b", "localhost:50001", "addres of the nx-os grpc backend")
 
@@ -27,15 +28,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not connect to dialout: %v", err)
 	}
+	defer stream.CloseSend()
 
-	req := &mdt_dialout.MdtDialoutArgs{
+	err = stream.Send(&mdt_dialout.MdtDialoutArgs{
 		ReqId: 1,
 		Data:  getTelemetryBytes(),
+	})
+	if err != nil {
+		log.Fatalf("cannot send telemetry data: %v", err)
 	}
-	go stream.Send(req)
-	go stream.Recv()
-	time.Sleep(5 * time.Second)
-	stream.CloseSend()
+
+	time.Sleep(5 * time.Second) // To avoid session errors on the server
 	log.Println("done!")
 }
 
