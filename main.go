@@ -33,7 +33,7 @@ var (
 func main() {
 	flag.StringVar(&server.bootstrap, "bootstrap", "localhost:9092", "kafka bootstrap server")
 	flag.StringVar(&server.topic, "topic", "telemetry-nxos", "kafka topic that will receive the messages")
-	flag.Var(&server.parameters, "param", "kafka producer parameters (e.x. acks=1), can be specified multiple times")
+	flag.StringVar(&server.parameters, "params", "", "optional kafka producer parameters as a CSV of Key-Value pairs")
 	flag.BoolVar(&server.onmsMode, "opennms", false, "to emulate an OpenNMS minion when sending messages to kafka")
 	flag.StringVar(&server.minionID, "minion-id", "", "the ID of the minion to emulate [opennms mode only]")
 	flag.StringVar(&server.minionLocation, "minion-location", "", "the location of the minion to emulate [opennms mode only]")
@@ -53,17 +53,6 @@ func main() {
 	server.stop()
 }
 
-type arrayFlags []string
-
-func (i *arrayFlags) String() string {
-	return strings.Join(*i, ", ")
-}
-
-func (i *arrayFlags) Set(value string) error {
-	*i = append(*i, value)
-	return nil
-}
-
 type dialoutServer struct {
 	server         *grpc.Server
 	producer       *kafka.Producer
@@ -71,7 +60,7 @@ type dialoutServer struct {
 	debug          bool
 	bootstrap      string
 	topic          string
-	parameters     arrayFlags
+	parameters     string
 	onmsMode       bool
 	maxBufferSize  int
 	minionID       string
@@ -95,7 +84,7 @@ func (srv *dialoutServer) start() error {
 	}
 
 	kafkaConfig := &kafka.ConfigMap{"bootstrap.servers": srv.bootstrap}
-	for _, kv := range srv.parameters {
+	for _, kv := range strings.Split(srv.parameters, ",") {
 		array := strings.Split(kv, "=")
 		if err = kafkaConfig.SetKey(array[0], array[1]); err != nil {
 			return err

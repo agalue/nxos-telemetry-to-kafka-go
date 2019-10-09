@@ -14,38 +14,20 @@ import (
 	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
 
-type kafkaClient struct {
-	bootstrap  string
-	topic      string
-	groupID    string
-	parameters arrayFlags
-}
-
-type arrayFlags []string
-
-func (i *arrayFlags) String() string {
-	return strings.Join(*i, ", ")
-}
-
-func (i *arrayFlags) Set(value string) error {
-	*i = append(*i, value)
-	return nil
-}
-
 func main() {
-	var client kafkaClient
-	flag.StringVar(&client.bootstrap, "bootstrap", "localhost:9092", "kafka bootstrap server")
-	flag.StringVar(&client.topic, "topic", "telemetry-nxos", "kafka topic that will receive the messages")
-	flag.StringVar(&client.groupID, "group-id", "nxos-client", "the consumer group ID")
-	flag.Var(&client.parameters, "param", "kafka consumer parameters (e.x. acks=1), can be specified multiple times")
+	var bootstrap, topic, groupID, parameters string
+	flag.StringVar(&bootstrap, "bootstrap", "localhost:9092", "kafka bootstrap server")
+	flag.StringVar(&topic, "topic", "telemetry-nxos", "kafka topic that will receive the messages")
+	flag.StringVar(&groupID, "group-id", "nxos-client", "the consumer group ID")
+	flag.StringVar(&parameters, "parameters", "", "optional kafka consumer parameters as a CSV of Key-Value pairs")
 	flag.Parse()
 
 	config := &kafka.ConfigMap{
-		"bootstrap.servers": client.bootstrap,
-		"group.id":          client.groupID,
+		"bootstrap.servers": bootstrap,
+		"group.id":          groupID,
 		"auto.offset.reset": "latest",
 	}
-	for _, kv := range client.parameters {
+	for _, kv := range strings.Split(parameters, ",") {
 		array := strings.Split(kv, "=")
 		if err := config.SetKey(array[0], array[1]); err != nil {
 			log.Fatalf("cannot add consumer config %s: %v\n", kv, err)
@@ -57,7 +39,7 @@ func main() {
 		log.Fatalf("cannot create consumer: %v\n", err)
 	}
 
-	consumer.SubscribeTopics([]string{client.topic}, nil)
+	consumer.SubscribeTopics([]string{topic}, nil)
 
 	go func() {
 		var buffer bytes.Buffer
