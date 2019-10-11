@@ -16,6 +16,8 @@ import (
 // WARNING This is for test purposes only
 func main() {
 	backend := flag.String("b", "localhost:50001", "addres of the nx-os grpc backend")
+	fields := flag.Int("n", 5, "number of sample fields")
+	flag.Parse()
 
 	conn, err := grpc.Dial(*backend, grpc.WithInsecure())
 	if err != nil {
@@ -32,7 +34,7 @@ func main() {
 
 	err = stream.Send(&mdt_dialout.MdtDialoutArgs{
 		ReqId: 1,
-		Data:  getTelemetryBytes(),
+		Data:  getTelemetryBytes(*fields),
 	})
 	if err != nil {
 		log.Fatalf("cannot send telemetry data: %v", err)
@@ -42,7 +44,19 @@ func main() {
 	log.Println("done!")
 }
 
-func getTelemetryBytes() []byte {
+func getTelemetryBytes(numFields int) []byte {
+	fields := []*telemetry_bis.TelemetryField{
+		{
+			Name:        "owner",
+			ValueByType: &telemetry_bis.TelemetryField_StringValue{StringValue: "agalue"},
+		},
+	}
+	for i := 0; i < numFields; i++ {
+		fields = append(fields, &telemetry_bis.TelemetryField{
+			Name:        fmt.Sprintf("k%d", i),
+			ValueByType: &telemetry_bis.TelemetryField_StringValue{StringValue: fmt.Sprintf("v%d", i)},
+		})
+	}
 	telemetry := &telemetry_bis.Telemetry{
 		MsgTimestamp: 1543236572000,
 		EncodingPath: "type:test",
@@ -50,20 +64,11 @@ func getTelemetryBytes() []byte {
 		Subscription: &telemetry_bis.Telemetry_SubscriptionIdStr{SubscriptionIdStr: "subscription"},
 		DataGpbkv: []*telemetry_bis.TelemetryField{
 			{
-				Fields: []*telemetry_bis.TelemetryField{
-					{
-						Name: "content",
-						Fields: []*telemetry_bis.TelemetryField{
-							{
-								Name:        "owner",
-								ValueByType: &telemetry_bis.TelemetryField_StringValue{StringValue: "agalue"},
-							},
-						},
-					},
-				},
+				Fields: fields,
 			},
 		},
 	}
+	//	telemetry.GetDataGpbkv()[0].GetFields()[0].
 	fmt.Printf("sending %s", proto.MarshalTextString(telemetry))
 	data, _ := proto.Marshal(telemetry)
 	return data
