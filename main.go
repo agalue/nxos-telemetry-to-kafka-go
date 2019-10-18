@@ -176,9 +176,8 @@ func (srv dialoutServer) sendToKafka(data []byte) {
 	log.Printf("sending message of %d bytes divided into %d chunks\n", len(msg), totalChunks)
 	var chunk int32
 	for chunk = 0; chunk < totalChunks; chunk++ {
-		chunkID := chunk + 1
 		bytes := srv.wrapMessageToSink(id, chunk, totalChunks, msg)
-		log.Printf("sending chunk %d/%d to Kafka topic %s using messageId %s", chunkID, totalChunks, srv.topic, id)
+		log.Printf("sending chunk %d/%d to Kafka topic %s using messageId %s", chunk+1, totalChunks, srv.topic, id)
 		srv.producer.Produce(&kafka.Message{
 			TopicPartition: kafka.TopicPartition{Topic: &srv.topic, Partition: kafka.PartitionAny},
 			Key:            []byte(id), // To guarantee order when having multiple partitions
