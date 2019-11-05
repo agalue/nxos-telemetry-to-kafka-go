@@ -17,6 +17,8 @@ import (
 func main() {
 	backend := flag.String("b", "localhost:50001", "addres of the nx-os grpc backend")
 	fields := flag.Int("n", 5, "number of sample fields")
+	total := flag.Int("t", 10, "number of total messages to send")
+	wait := flag.Duration("w", 1*time.Second, "number of seconds to wait between messages")
 	flag.Parse()
 
 	conn, err := grpc.Dial(*backend, grpc.WithInsecure())
@@ -32,12 +34,15 @@ func main() {
 	}
 	defer stream.CloseSend()
 
-	err = stream.Send(&mdt_dialout.MdtDialoutArgs{
-		ReqId: 1,
-		Data:  getTelemetryBytes(*fields),
-	})
-	if err != nil {
-		log.Fatalf("cannot send telemetry data: %v", err)
+	for i := 0; i < *total; i++ {
+		err = stream.Send(&mdt_dialout.MdtDialoutArgs{
+			ReqId: 1,
+			Data:  getTelemetryBytes(*fields),
+		})
+		if err != nil {
+			log.Printf("[error] cannot send telemetry data: %v", err)
+		}
+		time.Sleep(*wait)
 	}
 
 	time.Sleep(5 * time.Second) // To avoid session errors on the server
@@ -58,7 +63,7 @@ func getTelemetryBytes(numFields int) []byte {
 		})
 	}
 	telemetry := &telemetry_bis.Telemetry{
-		MsgTimestamp: 1543236572000,
+		MsgTimestamp: makeTimestamp(),
 		EncodingPath: "type:test",
 		NodeId:       &telemetry_bis.Telemetry_NodeIdStr{NodeIdStr: "hostname"},
 		Subscription: &telemetry_bis.Telemetry_SubscriptionIdStr{SubscriptionIdStr: "subscription"},
@@ -72,4 +77,8 @@ func getTelemetryBytes(numFields int) []byte {
 	fmt.Printf("sending %s", proto.MarshalTextString(telemetry))
 	data, _ := proto.Marshal(telemetry)
 	return data
+}
+
+func makeTimestamp() uint64 {
+	return uint64(time.Now().UnixNano() / int64(time.Millisecond))
 }
