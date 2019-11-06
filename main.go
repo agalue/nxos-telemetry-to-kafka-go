@@ -80,7 +80,7 @@ func (srv *dialoutServer) start() error {
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", srv.port))
 	if err != nil {
-		return fmt.Errorf("could not listen to port %d: %v", srv.port, err)
+		return fmt.Errorf("cannot initialize listener: %v", err)
 	}
 
 	kafkaConfig := &kafka.ConfigMap{"bootstrap.servers": srv.bootstrap}
