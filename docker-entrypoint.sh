@@ -21,9 +21,9 @@ done
 
 exec /nxos-grpc -opennms \
   -port ${PORT-50051} \
-  -bootstrap ${BOOTSTRAP_SERVERS} \
-  -topic ${TOPIC-OpenNMS.Sink.Telemetry-NXOS} \
-  -max-buffer-size ${MESSAGE_BUFFER_SIZE-0} \
-  -params $(join , ${OPTIONS[@]}) \
+  -minion-id ${MINION_ID} \
   -minion-location ${MINION_LOCATION} \
-  -minion-id ${MINION_ID}
+  -bootstrap ${BOOTSTRAP_SERVERS-localhost:9092} \
+  -topic "${TOPIC-OpenNMS.Sink.Telemetry-NXOS}" \
+  -max-buffer-size ${MESSAGE_BUFFER_SIZE-0} \
+  -params "$(join , ${OPTIONS[@]})"
