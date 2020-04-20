@@ -1,8 +1,8 @@
-// Source: https://github.com/OpenNMS/opennms/blob/develop/core/ipc/sink/common/src/main/resources/sink-message.proto
+// Source: https://github.com/OpenNMS/opennms/blob/master/core/ipc/sink/common/src/main/resources/sink-message.proto
 
 syntax = "proto2";
 
-option go_package = "sink";
+option go_package = ".;sink";
 
 message TracingInfo {
     required string key = 1;
