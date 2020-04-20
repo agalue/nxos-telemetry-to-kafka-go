@@ -58,6 +58,8 @@ The [test](./test) directory contains a test application that emulates a Nexus s
 
 This tool was designed and implemented with Go 1.13 using Go-Modules.
 
+Make sure to have `librdkafka` installed on your system, as the chosen library for Kafka relies on it.
+
 To compile for linux:
 
 ```bash
