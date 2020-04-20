@@ -1,26 +1,25 @@
 // A sample kafka consumer that works with single or multi-part messages
 // There are multiple ways to implement this, so use this as a reference only.
-package main
+//
+// @author Alejandro Galue <agalue@opennms.org>
+
+package client
 
 import (
-	"flag"
 	"fmt"
 	"log"
-	"os"
-	"os/signal"
 	"strings"
-	"syscall"
+	"sync"
 
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
-	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry_bis"
 	"github.com/golang/protobuf/proto"
 	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
 
-// ProcessTelemetry the action to execute after successfully receieved a Cisco Telemetry message
-type ProcessTelemetry func(msg *telemetry_bis.Telemetry)
+// ProcessSinkMessage defines the action to execute after successfully receieved a Sink message
+type ProcessSinkMessage func(msg []byte, wg *sync.WaitGroup)
 
-// KafkaClient a simple Kafka consumer client
+// KafkaClient defines a simple Kafka consumer client
 type KafkaClient struct {
 	Bootstrap  string
 	Topic      string
@@ -30,10 +29,13 @@ type KafkaClient struct {
 	consumer     *kafka.Consumer
 	msgBuffer    map[string][]byte
 	chunkTracker map[string]int32
+	waitGroup    *sync.WaitGroup
+	mutex        *sync.Mutex
+	stopping     bool
 }
 
-// CreateConfig creates the Kafka Configuration Map
-func (cli *KafkaClient) CreateConfig() *kafka.ConfigMap {
+// Creates the Kafka Configuration Map
+func (cli *KafkaClient) createConfig() *kafka.ConfigMap {
 	config := &kafka.ConfigMap{
 		"bootstrap.servers":     cli.Bootstrap,
 		"group.id":              cli.GroupID,
@@ -52,25 +54,17 @@ func (cli *KafkaClient) CreateConfig() *kafka.ConfigMap {
 	return config
 }
 
-// Initialize build and initialize the Kafka consumer
-func (cli *KafkaClient) Initialize() error {
-	var err error
-	cli.consumer, err = kafka.NewConsumer(cli.CreateConfig())
-	if err != nil {
-		return fmt.Errorf("cannot create consumer: %v", err)
-	}
-	err = cli.consumer.Subscribe(cli.Topic, nil)
-	if err != nil {
-		return fmt.Errorf("cannot subscribe to topic %s: %v", cli.Topic, err)
-	}
+// Initializes all local variables
+func (cli *KafkaClient) createVariables() {
 	cli.msgBuffer = make(map[string][]byte)
 	cli.chunkTracker = make(map[string]int32)
-	return nil
+	cli.waitGroup = &sync.WaitGroup{}
+	cli.mutex = &sync.Mutex{}
 }
 
-// ProcessMessage processes a Kafka message
+// Processes a Kafka message
 // It return a non-empty slice when the message is complete
-func (cli *KafkaClient) ProcessMessage(msg *kafka.Message) []byte {
+func (cli *KafkaClient) processMessage(msg *kafka.Message) []byte {
 	sinkMsg := &sink.SinkMessage{}
 	if err := proto.Unmarshal(msg.Value, sinkMsg); err != nil {
 		log.Printf("invalid message received: %v\n", err)
@@ -82,6 +76,7 @@ func (cli *KafkaClient) ProcessMessage(msg *kafka.Message) []byte {
 	content := sinkMsg.GetContent()
 	log.Printf("received message %s (chunk %d of %d, with %d bytes) on %s\n", id, chunk, total, len(content), msg.TopicPartition)
 	if chunk != total {
+		cli.mutex.Lock()
 		if cli.chunkTracker[id] < chunk {
 			log.Printf("adding %d bytes to buffer for message %s", len(content), id)
 			// Adds partial message to the buffer
@@ -90,6 +85,7 @@ func (cli *KafkaClient) ProcessMessage(msg *kafka.Message) []byte {
 		} else {
 			log.Printf("chunk %d from %s was already processed, ignoring...\n", chunk, id)
 		}
+		cli.mutex.Unlock()
 		return nil
 	}
 	// Retrieve the complete message from the buffer
@@ -98,78 +94,67 @@ func (cli *KafkaClient) ProcessMessage(msg *kafka.Message) []byte {
 		data = content
 	} else {
 		log.Printf("adding %d bytes to final message %s", len(content), id)
+		cli.mutex.Lock()
 		data = append(cli.msgBuffer[id], content...)
+		cli.mutex.Unlock()
 	}
 	cli.bufferCleanup(id)
 	return data
 }
 
+// Cleans up the chunk buffer. Should be called after successfully processed all chunks.
 func (cli *KafkaClient) bufferCleanup(id string) {
-	log.Printf("cleanup buffer for message %s\n", id)
+	log.Printf("cleanup buffer for message %s", id)
+	cli.mutex.Lock()
 	if _, ok := cli.msgBuffer[id]; ok {
 		delete(cli.msgBuffer, id)
 	}
 	if _, ok := cli.chunkTracker[id]; ok {
 		delete(cli.chunkTracker, id)
 	}
+	cli.mutex.Unlock()
 }
 
-func (cli *KafkaClient) getTelemetry(data []byte) *telemetry_bis.Telemetry {
-	telemetry := &telemetry_bis.Telemetry{}
-	if err := proto.Unmarshal(data, telemetry); err != nil {
-		log.Printf("cannot parse message with telemetry_bis.proto: %v\n", err)
-		return nil
+// Initialize builds the Kafka consumer object, and chunk buffers
+func (cli *KafkaClient) Initialize() error {
+	var err error
+	cli.consumer, err = kafka.NewConsumer(cli.createConfig())
+	if err != nil {
+		return fmt.Errorf("cannot create consumer: %v", err)
 	}
-	return telemetry
+	err = cli.consumer.Subscribe(cli.Topic, nil)
+	if err != nil {
+		return fmt.Errorf("cannot subscribe to topic %s: %v", cli.Topic, err)
+	}
+	cli.createVariables()
+	return nil
 }
 
 // Start reads messages from the given Kafka topic on an infinite loop
-// It is recommended to use it within a GoRoutine
-func (cli *KafkaClient) Start(action ProcessTelemetry) {
+// It is recommended to use it within a Go Routine
+func (cli *KafkaClient) Start(action ProcessSinkMessage) {
+	cli.stopping = false
 	for {
+		if cli.stopping {
+			return
+		}
 		msg, err := cli.consumer.ReadMessage(-1)
 		if err == nil {
-			if data := cli.ProcessMessage(msg); data != nil {
-				log.Printf("processing telemetry message of %d bytes\n", len(data))
-				if telemetry := cli.getTelemetry(data); telemetry != nil {
-					go action(telemetry)
-				}
+			if data := cli.processMessage(msg); data != nil {
+				log.Printf("processing sink message of %d bytes", len(data))
+				cli.waitGroup.Add(1)
+				go action(data, cli.waitGroup)
 			}
 		} else {
 			// The client will automatically try to recover from all errors.
-			log.Printf("consumer error: %v (%v)\n", err, msg)
+			log.Printf("consumer error: %v (%v)", err, msg)
 		}
 	}
 }
 
-// Stop terminates the Kafka consumer
+// Stop terminates the Kafka consumer and waits for the execution of all action handlers.
 func (cli *KafkaClient) Stop() {
+	cli.stopping = true
+	cli.waitGroup.Wait()
 	cli.consumer.Close()
-}
-
-// The main function
-func main() {
-	client := KafkaClient{}
-	flag.StringVar(&client.Bootstrap, "bootstrap", "localhost:9092", "kafka bootstrap server")
-	flag.StringVar(&client.Topic, "topic", "telemetry-nxos", "kafka topic that will receive the messages")
-	flag.StringVar(&client.GroupID, "group-id", "nxos-client", "the consumer group ID")
-	flag.StringVar(&client.Parameters, "parameters", "", "optional kafka consumer parameters as a CSV of Key-Value pairs")
-	flag.Parse()
-
-	if err := client.Initialize(); err != nil {
-		panic(err)
-	}
-
-	log.Printf("consumer started")
-	go client.Start(func(msg *telemetry_bis.Telemetry) {
-		// TODO Implement your custom actions here
-		log.Printf("received message\n%s", proto.MarshalTextString(msg))
-	})
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	log.Printf("stopping consumer")
-	client.Stop()
-	log.Printf("done!")
 }
