@@ -5,7 +5,7 @@ RUN mkdir /app && \
     apk add --no-cache build-base git librdkafka-dev@edgecommunity
 ADD ./ /app/
 WORKDIR /app
-RUN RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags musl -a -o nxos-grpc .
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags musl -a -o nxos-grpc .
 
 FROM alpine
 RUN echo "@edgecommunity http://nl.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
