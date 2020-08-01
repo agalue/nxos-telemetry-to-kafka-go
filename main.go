@@ -25,9 +25,7 @@ import (
 
 var (
 	version = "v0.1.0"
-	server  = dialoutServer{
-		minionAddress: "127.0.0.1", // FIXME
-	}
+	server  = dialoutServer{}
 )
 
 func main() {
@@ -65,7 +63,6 @@ type dialoutServer struct {
 	maxBufferSize  int
 	minionID       string
 	minionLocation string
-	minionAddress  string
 }
 
 func (srv *dialoutServer) start() error {
@@ -153,11 +150,11 @@ func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialout
 			return nil
 		}
 		log.Printf("received request with ID %d of %d bytes from %s\n", reply.ReqId, len(reply.Data), peer.Addr)
-		srv.sendToKafka(reply.Data)
+		srv.sendToKafka(peer.Addr.String(), reply.Data)
 	}
 }
 
-func (srv dialoutServer) sendToKafka(data []byte) {
+func (srv dialoutServer) sendToKafka(sourceAddr string, data []byte) {
 	if srv.debug {
 		nxosMsg := &telemetry_bis.Telemetry{}
 		err := proto.Unmarshal(data, nxosMsg)
@@ -169,7 +166,7 @@ func (srv dialoutServer) sendToKafka(data []byte) {
 	}
 	msg := data
 	if srv.onmsMode {
-		msg = srv.wrapMessageToTelemetry(data)
+		msg = srv.wrapMessageToTelemetry(sourceAddr, data)
 	}
 	id := uuid.New().String()
 	totalChunks := srv.getTotalChunks(msg)
@@ -230,14 +227,14 @@ func (srv dialoutServer) getRemainingBufferSize(messageSize, chunk int32) int32 
 	return messageSize
 }
 
-func (srv dialoutServer) wrapMessageToTelemetry(data []byte) []byte {
+func (srv dialoutServer) wrapMessageToTelemetry(sourceAddr string, data []byte) []byte {
 	log.Printf("wrapping message to emulate minion %s at location %s\n", srv.minionID, srv.minionLocation)
 	now := uint64(time.Now().UnixNano() / int64(time.Millisecond))
 	port := uint32(srv.port)
 	telemetryLogMsg := &telemetry.TelemetryMessageLog{
 		SystemId:      &srv.minionID,
 		Location:      &srv.minionLocation,
-		SourceAddress: &srv.minionAddress,
+		SourceAddress: &sourceAddr,
 		SourcePort:    &port,
 		Message: []*telemetry.TelemetryMessage{
 			{
