@@ -99,12 +99,12 @@ func (srv *dialoutServer) start() error {
 			switch ev := e.(type) {
 			case *kafka.Message:
 				if ev.TopicPartition.Error != nil {
-					log.Printf("delivery failed: %v\n", ev.TopicPartition)
+					log.Printf("delivery failed: %v", ev.TopicPartition)
 				} else {
-					log.Printf("delivered message to %v\n", ev.TopicPartition)
+					log.Printf("delivered message to %v", ev.TopicPartition)
 				}
 			default:
-				log.Printf("kafka event: %s\n", ev)
+				log.Printf("kafka event: %s", ev)
 			}
 		}
 	}()
@@ -113,7 +113,7 @@ func (srv *dialoutServer) start() error {
 	mdt_dialout.RegisterGRPCMdtDialoutServer(srv.server, srv)
 
 	go func() {
-		log.Printf("starting gRPC server on port %d\n", srv.port)
+		log.Printf("starting gRPC server on port %d", srv.port)
 		err = srv.server.Serve(listener)
 		if err != nil {
 			log.Fatalf("could not serve: %v", err)
@@ -132,26 +132,31 @@ func (srv dialoutServer) stop() {
 
 func (srv dialoutServer) MdtDialout(stream mdt_dialout.GRPCMdtDialout_MdtDialoutServer) error {
 	peer, peerOK := peer.FromContext(stream.Context())
+	addr := "127.0.0.1"
 	if peerOK {
-		log.Printf("accepted Cisco MDT GRPC dialout connection from %s\n", peer.Addr)
+		log.Printf("accepted Cisco MDT GRPC dialout connection from %s", peer.Addr)
+		addr = peer.Addr.String()
 	}
 	for {
 		reply, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
 		if err != nil {
-			if err == io.EOF {
-				log.Println("session closed")
-			} else {
-				log.Println("session error")
-			}
+			log.Printf("dialout receive error from %s: %v", addr, err)
 			return err
 		}
 		if len(reply.Data) == 0 && len(reply.Errors) != 0 {
-			log.Printf("error from client %s, %s\n", peer.Addr, reply.Errors)
-			return nil
+			log.Printf("dialout error from %s: %s", addr, reply.Errors)
+			break
 		}
-		log.Printf("received request with ID %d of %d bytes from %s\n", reply.ReqId, len(reply.Data), peer.Addr)
-		srv.sendToKafka(peer.Addr.String(), reply.Data)
+		log.Printf("received request with ID %d of %d bytes from %s", reply.ReqId, len(reply.Data), addr)
+		srv.sendToKafka(addr, reply.Data)
 	}
+	if peerOK {
+		log.Printf("closed Cisco MDT GRPC dialout connection from %s", peer.Addr)
+	}
+	return nil
 }
 
 func (srv dialoutServer) sendToKafka(sourceAddr string, data []byte) {
@@ -159,7 +164,7 @@ func (srv dialoutServer) sendToKafka(sourceAddr string, data []byte) {
 		nxosMsg := &telemetry_bis.Telemetry{}
 		err := proto.Unmarshal(data, nxosMsg)
 		if err == nil {
-			log.Printf("received message:\n%s", proto.MarshalTextString(nxosMsg))
+			log.Printf("received message: %s", proto.MarshalTextString(nxosMsg))
 		} else {
 			log.Println("cannot parse the payload using telemetry_bis.proto")
 		}
@@ -170,7 +175,7 @@ func (srv dialoutServer) sendToKafka(sourceAddr string, data []byte) {
 	}
 	id := uuid.New().String()
 	totalChunks := srv.getTotalChunks(msg)
-	log.Printf("sending message of %d bytes divided into %d chunks\n", len(msg), totalChunks)
+	log.Printf("sending message of %d bytes divided into %d chunks", len(msg), totalChunks)
 	var chunk int32
 	for chunk = 0; chunk < totalChunks; chunk++ {
 		bytes := srv.wrapMessageToSink(id, chunk, totalChunks, msg)
@@ -210,7 +215,7 @@ func (srv dialoutServer) wrapMessageToSink(id string, chunk, totalChunks int32, 
 	}
 	bytes, err := proto.Marshal(sinkMsg)
 	if err != nil {
-		log.Printf("error cannot serialize sink message: %v\n", err)
+		log.Printf("error cannot serialize sink message: %v", err)
 		return []byte{}
 	}
 	return bytes
@@ -228,7 +233,7 @@ func (srv dialoutServer) getRemainingBufferSize(messageSize, chunk int32) int32 
 }
 
 func (srv dialoutServer) wrapMessageToTelemetry(sourceAddr string, data []byte) []byte {
-	log.Printf("wrapping message to emulate minion %s at location %s\n", srv.minionID, srv.minionLocation)
+	log.Printf("wrapping message to emulate minion %s at location %s", srv.minionID, srv.minionLocation)
 	now := uint64(time.Now().UnixNano() / int64(time.Millisecond))
 	port := uint32(srv.port)
 	telemetryLogMsg := &telemetry.TelemetryMessageLog{
@@ -245,7 +250,7 @@ func (srv dialoutServer) wrapMessageToTelemetry(sourceAddr string, data []byte) 
 	}
 	msg, err := proto.Marshal(telemetryLogMsg)
 	if err != nil {
-		log.Printf("error cannot serialize telemetry message: %v\n", err)
+		log.Printf("error cannot serialize telemetry message: %v", err)
 		return []byte{}
 	}
 	return msg
