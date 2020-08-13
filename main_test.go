@@ -73,7 +73,7 @@ func TestWrapMessageToTelemetry(t *testing.T) {
 		minionID:       "minion01",
 		minionLocation: "Apex",
 	}
-	msg := srv.wrapMessageToTelemetry(data)
+	msg := srv.wrapMessageToTelemetry("127.0.0.1", data)
 	logMsg := &telemetry.TelemetryMessageLog{}
 	err := proto.Unmarshal(msg, logMsg)
 	assert.NilError(t, err)
