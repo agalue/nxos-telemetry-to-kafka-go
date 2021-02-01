@@ -31,7 +31,7 @@ var (
 func main() {
 	flag.StringVar(&server.bootstrap, "bootstrap", "localhost:9092", "kafka bootstrap server")
 	flag.StringVar(&server.topic, "topic", "telemetry-nxos", "kafka topic that will receive the messages")
-	flag.StringVar(&server.parameters, "params", "", "optional kafka producer parameters as a CSV of Key-Value pairs")
+	flag.Var(&server.parameters, "param", "optional kafka producer parameter as key-value pair, for instance acks=1 (can be used multiple times)")
 	flag.BoolVar(&server.onmsMode, "opennms", false, "to emulate an OpenNMS minion when sending messages to kafka")
 	flag.StringVar(&server.minionID, "minion-id", "", "the ID of the minion to emulate [opennms mode only]")
 	flag.StringVar(&server.minionLocation, "minion-location", "", "the location of the minion to emulate [opennms mode only]")
@@ -51,6 +51,17 @@ func main() {
 	server.stop()
 }
 
+type properties []string
+
+func (p *properties) String() string {
+	return strings.Join(*p, ", ")
+}
+
+func (p *properties) Set(value string) error {
+	*p = append(*p, value)
+	return nil
+}
+
 type dialoutServer struct {
 	server         *grpc.Server
 	producer       *kafka.Producer
@@ -58,7 +69,7 @@ type dialoutServer struct {
 	debug          bool
 	bootstrap      string
 	topic          string
-	parameters     string
+	parameters     properties
 	onmsMode       bool
 	maxBufferSize  int
 	minionID       string
@@ -81,8 +92,8 @@ func (srv *dialoutServer) start() error {
 	}
 
 	kafkaConfig := &kafka.ConfigMap{"bootstrap.servers": srv.bootstrap}
-	if srv.parameters != "" {
-		for _, kv := range strings.Split(srv.parameters, ",") {
+	if srv.parameters != nil {
+		for _, kv := range srv.parameters {
 			array := strings.Split(kv, "=")
 			if err = kafkaConfig.SetKey(array[0], array[1]); err != nil {
 				return err
@@ -208,9 +219,9 @@ func (srv dialoutServer) wrapMessageToSink(id string, chunk, totalChunks int32, 
 	offset := chunk * srv.getMaxBufferSize()
 	msg := data[offset : offset+bufferSize]
 	sinkMsg := &sink.SinkMessage{
-		MessageId:          &id,
-		CurrentChunkNumber: &chunk,
-		TotalChunks:        &totalChunks,
+		MessageId:          id,
+		CurrentChunkNumber: chunk,
+		TotalChunks:        totalChunks,
 		Content:            msg,
 	}
 	bytes, err := proto.Marshal(sinkMsg)

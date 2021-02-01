@@ -14,7 +14,7 @@ do
       echo "[Skipping] '$key'"
     else
       echo "[Configuring] '$key'='$val'"
-      OPTIONS+=("$key=$val")
+      OPTIONS+=(-param "$key=$val")
     fi
   fi
 done
@@ -26,4 +26,4 @@ exec /nxos-grpc -opennms \
   -bootstrap ${BOOTSTRAP_SERVERS-localhost:9092} \
   -topic "${TOPIC-OpenNMS.Sink.Telemetry-NXOS}" \
   -max-buffer-size ${MESSAGE_BUFFER_SIZE-0} \
-  -params "$(join , ${OPTIONS[@]})"
+  ${OPTIONS[@]}
