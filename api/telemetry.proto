@@ -2,7 +2,7 @@
 
 syntax = "proto2";
 
-option go_package = ".;telemetry";
+option go_package = "./telemetry";
 
 message TelemetryMessage {
     required uint64 timestamp = 1;

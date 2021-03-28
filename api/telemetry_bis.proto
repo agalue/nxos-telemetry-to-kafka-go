@@ -23,7 +23,7 @@
 
 syntax = "proto3";
 
-option go_package = ".;telemetry_bis";
+option go_package = "./telemetry_bis";
 
 /*
  * Common message used as a header to both compact and self-describing

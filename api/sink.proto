@@ -4,7 +4,7 @@ syntax = "proto3";
 
 package sink;
 
-option go_package = ".;sink";
+option go_package = "./sink";
 
 message SinkMessage {
     string message_id = 1;
