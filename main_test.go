@@ -7,7 +7,7 @@ import (
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
 	"github.com/golang/protobuf/proto"
-	"gotest.tools/assert"
+	"gotest.tools/v3/assert"
 )
 
 func TestTotalChunks(t *testing.T) {
