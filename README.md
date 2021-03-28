@@ -54,23 +54,29 @@ The [client](./client) directory contains a sample Kafka consumer application th
 
 The [test](./test) directory contains a test application that emulates a Nexus switch (i.e. a gRPC client) that sends mock content as a valid `TelemetryMessage`.
 
-## Compilation
+## Compile Locally
 
-This tool was designed and implemented with Go 1.13 using Go-Modules.
-
-Make sure to have `librdkafka` installed on your system, as the chosen library for Kafka relies on it.
+To compile directly on your machine, make sure to have at least Go 1.16 and the latest [librdkafka](https://github.com/edenhill/librdkafka) installed on your system.
 
 To compile for linux:
 
 ```bash
-GOOS=linux go build -a -o nxos-grpc .
+go build -a -o nxos-grpc .
 ```
+
+## Compile with Docker
 
 Alternatively, the provided `Dockerfile` offers a way to compile and create an image based on `alpine` and the latest version of `librdkafka`.
 
 The `docker-entrypoint.sh` assumes `opennms` mode. For this reason, if OpenNMS is not going to be involved, make sure to update that file.
 
+```
+docker build -t agalue/opennms-nxos-grpc-go .
+```
+
 ## Usage
+
+Make sure the latest [librdkafka](https://github.com/edenhill/librdkafka) installed on your system.
 
 ```bash
 Usage of nxos-grpc:
