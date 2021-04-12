@@ -14,7 +14,7 @@ do
       echo "[Skipping] '$key'"
     else
       echo "[Configuring] '$key'='$val'"
-      OPTIONS+=(-param "$key=$val")
+      OPTIONS+=(-param "'$key=$val'")
     fi
   fi
 done
