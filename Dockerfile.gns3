@@ -1,11 +1,17 @@
 FROM golang:alpine AS builder
-RUN mkdir /app && apk add --no-cache build-base git librdkafka-dev
+RUN mkdir /app && \
+    echo "@edgecommunity http://nl.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache alpine-sdk git cyrus-sasl-dev librdkafka-dev@edgecommunity
 ADD ./ /app/
 WORKDIR /app
-RUN go build -a -o nxos-grpc .
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags musl -a -o nxos-grpc .
 
 FROM alpine
-RUN apk add --no-cache build-base git librdkafka && rm -rf /var/cache/apk/*
+RUN echo "@edgecommunity http://nl.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
+    apk update && \
+    apk add --no-cache bash cyrus-sasl librdkafka@edgecommunity && \
+    rm -rf /var/cache/apk/*
 COPY --from=builder /app/nxos-grpc /nxos-grpc
 COPY ./docker-entrypoint.sh /
 LABEL maintainer="Alejandro Galue <agalue@opennms.org>" name="NX-OS gRPC to Kafka"
