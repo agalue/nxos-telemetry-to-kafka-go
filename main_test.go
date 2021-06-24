@@ -6,7 +6,7 @@ import (
 
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
 	"gotest.tools/v3/assert"
 )
 

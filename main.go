@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -16,16 +16,15 @@ import (
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry_bis"
-	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/protobuf/proto"
 	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
 
 var (
-	version = "v0.1.0"
-	server  = dialoutServer{}
+	server = dialoutServer{}
 )
 
 func main() {
@@ -63,6 +62,7 @@ func (p *properties) Set(value string) error {
 }
 
 type dialoutServer struct {
+	mdt_dialout.UnimplementedGRPCMdtDialoutServer
 	server         *grpc.Server
 	producer       *kafka.Producer
 	port           int
@@ -175,7 +175,8 @@ func (srv dialoutServer) sendToKafka(sourceAddr string, data []byte) {
 		nxosMsg := &telemetry_bis.Telemetry{}
 		err := proto.Unmarshal(data, nxosMsg)
 		if err == nil {
-			log.Printf("received message: %s", proto.MarshalTextString(nxosMsg))
+			jsonString, _ := json.MarshalIndent(nxosMsg, "", "  ")
+			log.Printf("received message: %s", string(jsonString))
 		} else {
 			log.Println("cannot parse the payload using telemetry_bis.proto")
 		}
@@ -207,7 +208,7 @@ func (srv dialoutServer) getTotalChunks(data []byte) int32 {
 	if srv.maxBufferSize == 0 {
 		return int32(1)
 	}
-	chunks := int32(math.Ceil(float64(len(data) / srv.maxBufferSize)))
+	chunks := int32(len(data) / srv.maxBufferSize)
 	if len(data)%srv.maxBufferSize > 0 {
 		chunks++
 	}
