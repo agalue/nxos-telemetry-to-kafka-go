@@ -9,8 +9,8 @@ import (
 
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/mdt_dialout"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry_bis"
-	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 )
 
 // WARNING This is for test purposes only
@@ -73,8 +73,6 @@ func getTelemetryBytes(numFields int) []byte {
 			},
 		},
 	}
-	//	telemetry.GetDataGpbkv()[0].GetFields()[0].
-	fmt.Printf("sending %s", proto.MarshalTextString(telemetry))
 	data, _ := proto.Marshal(telemetry)
 	return data
 }

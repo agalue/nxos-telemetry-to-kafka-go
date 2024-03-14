@@ -5,14 +5,10 @@ RUN mkdir /app && \
     apk add --no-cache alpine-sdk git cyrus-sasl-dev librdkafka-dev@edgecommunity
 ADD ./ /app/
 WORKDIR /app
-RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags musl -a -o nxos-grpc .
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -tags static_all,netgo,musl -o nxos-grpc .
 
 FROM alpine
-RUN echo "@edgecommunity http://nl.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories && \
-    apk update && \
-    apk add --no-cache bash cyrus-sasl librdkafka@edgecommunity && \
-    rm -rf /var/cache/apk/* && \
-    addgroup -S grpc && adduser -S -G grpc grpc
+RUN apk add --no-cache bash tzdata && addgroup -S grpc && adduser -S -G grpc grpc
 COPY --from=builder /app/nxos-grpc /nxos-grpc
 COPY ./docker-entrypoint.sh /
 USER grpc

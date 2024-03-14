@@ -16,11 +16,11 @@ import (
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/sink"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry"
 	"github.com/agalue/nxos-telemetry-to-kafka-go/api/telemetry_bis"
+	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/protobuf/proto"
-	"gopkg.in/confluentinc/confluent-kafka-go.v1/kafka"
 )
 
 var (
