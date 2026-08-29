@@ -56,7 +56,7 @@ func getTelemetryBytes(numFields int) []byte {
 			ValueByType: &telemetry_bis.TelemetryField_StringValue{StringValue: "agalue"},
 		},
 	}
-	for i := 0; i < numFields; i++ {
+	for i := range numFields {
 		fields = append(fields, &telemetry_bis.TelemetryField{
 			Name:        fmt.Sprintf("k%d", i),
 			ValueByType: &telemetry_bis.TelemetryField_StringValue{StringValue: fmt.Sprintf("v%d", i)},
