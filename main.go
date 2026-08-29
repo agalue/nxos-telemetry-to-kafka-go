@@ -189,7 +189,7 @@ func (srv dialoutServer) sendToKafka(sourceAddr string, data []byte) {
 	totalChunks := srv.getTotalChunks(msg)
 	log.Printf("sending message of %d bytes divided into %d chunks", len(msg), totalChunks)
 	var chunk int32
-	for chunk = 0; chunk < totalChunks; chunk++ {
+	for chunk = range totalChunks {
 		bytes := srv.wrapMessageToSink(id, chunk, totalChunks, msg)
 		log.Printf("sending chunk %d/%d to Kafka topic %s using messageId %s", chunk+1, totalChunks, srv.topic, id)
 		srv.producer.Produce(&kafka.Message{
